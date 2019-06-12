@@ -1,9 +1,7 @@
 #ifndef JSON_H_INCLUDED
 #define JSON_H_INCLUDED
 
-#include <stddef.h>
-#include <stdio.h>
-#include <errno.h>
+#include <stdint.h>
 
 typedef enum
 {
@@ -41,40 +39,54 @@ typedef struct
 #define JSON_MAX 64
 #define HASHSIZE 100
 
-static unsigned hash(char *s)
+static void jsonfree(cjson* json);
+static cjson* jsonparse_value(const char *js, const size_t len, cjson* json, size_t *i);
+static cjson* jsonparse_string(const char *js, const size_t len, cjson* json, size_t *i);
+static cjson* jsonparse_array(const char *js, const size_t len, cjson* json, size_t *i);
+static cjson* jsonparse_obj(const char *js, const size_t len, cjson* json, int *i);
+
+static unsigned dicthash(char *s)
 {
-	unsigned hashval;
-	for (hashval = 0; *s != '\0'; s++)
-		hashval = *s + 31 * hashval;
-	return hashval % HASHSIZE;
+	unsigned val;
+	for (val = 0; *s != '\0'; s++)
+		val = *s + 31 * val;
+	return val % HASHSIZE;
 }
 
-static dict_entry* lookup(dict_entry** hashtab, char* s)
+static dict_entry* dictlookup(dict_entry** hashtab, char* s)
 {
 	dict_entry* np;
-	for (np = hashtab[hash(s)]; np != NULL; np = np->next)
+	for (np = hashtab[dicthash(s)]; np != NULL; np = np->next)
 		if(strcmp(s, np->key) == 0)
 			return np;
 	return NULL;
 }
 
-static dict_entry* install(dict_entry** hashtab, char *key, cjson *item)
+static dict_entry* dictinstall(dict_entry** hashtab, char *key, cjson *item)
 {
 	dict_entry* np = NULL;
-	unsigned hashval;
-	if ((np = lookup(hashtab, key)) == NULL)
+	unsigned val;
+	if ((np = dictlookup(hashtab, key)) == NULL)
 	{
 		np = malloc(sizeof(dict_entry));
 		if (np == NULL || (np->key = strdup(key)) == NULL)
 			return NULL;
-		hashval = hash(key);
-		np->next = hashtab[hashval];
-		hashtab[hashval] = np;
+		val = dicthash(key);
+		np->next = hashtab[val];
+		hashtab[val] = np;
 	}
-	else
-		free((void *) np->item);
+	else jsonfree(np->item);
 	np->item = item;
 	return np;
+}
+
+static void dictfree(dict* d)
+{
+	int i;
+	for(i = 0; i < HASHSIZE && d->size; ++i)
+		jsonfree(d->hashtab[i]);
+	free(d->hashtab);
+	free(d);
 }
 
 static cjson* jsonalloc(jsontype type, cjson* parent, void* init_value)
@@ -106,21 +118,6 @@ static cjson* jsonalloc(jsontype type, cjson* parent, void* init_value)
 			break;
 	}
 	return json;
-}
-
-static void jsonfree(cjson* json);
-static cjson* jsonparse_value(const char *js, const size_t len, cjson* json, size_t *i);
-static cjson* jsonparse_string(const char *js, const size_t len, cjson* json, size_t *i);
-static cjson* jsonparse_array(const char *js, const size_t len, cjson* json, size_t *i);
-static cjson* jsonparse_obj(const char *js, const size_t len, cjson* json, int *i);
-
-static void dictfree(dict* d)
-{
-	int i;
-	for(i = 0; i < HASHSIZE && d->size; ++i)
-		jsonfree(d->hashtab[i]);
-	free(d->hashtab);
-	free(d);
 }
 
 static void jsonfree(cjson* json)
@@ -206,130 +203,124 @@ static char* _parse_value(const char *js, const size_t len, size_t *i, int *dot)
 		return NULL;
 }
 
-static cjson* _parse_string(const char *js, const size_t len, size_t *i)
+static int _parse_hexa(const char *js, size_t *i, char** it)
+{
+    int n;
+    char r;
+    for(n = 0; n < 4; ++n)
+    {
+        ++(*i);
+        char c = js[*i];
+        switch(c)
+        {
+            case 'a': case 'b': case 'c': case 'd': case 'e': case 'f':
+                if(n % 2 == 0) r = c - 'a' + 10;
+                else r = (r << 4) +  c - 'a' + 10;
+                break;
+            case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9':
+                if(n % 2 == 0) r = c - '0';
+                else r = (r << 4) +  c - '0';
+                break;
+            default:
+                return -1;
+        }
+        if((n == 1 && r >= 0xc0) || n == 3)
+        {
+            **it = r;
+            ++(*it);
+        }
+    }
+    return 0;
+}
+
+static char* _parse_string(const char *js, const size_t len, size_t *i)
 {
 	int escape = 0;
 	size_t beg = *i;
 	int state = 0;
 	char* str = NULL;
+	char* res = NULL;
 	char* it = NULL;
+	// get the string length to prepare a buffer
 	for(; *i < len && js[*i] != '\0' && state == 0; ++(*i))
 	{
-		char c = js[*i];
-		switch(c)
+	    char c = js[*i];
+        switch(c)
 		{
 			case '\\':
-				if(escape == 0)
-					escape = 1;
-				else
-					escape = 0;
+				if(escape == 0) escape = 1;
+				else escape = 0;
 				break;
 			case '"':
-				if(escape == 0)
-					state = 1;
-				else
-					escape = 0;
+				if(escape == 0) state = 1;
+				else escape = 0;
 				break;
-			case '\b':
-			case '\n':
-			case '\f':
-			case '\r':
-			case '\t':
-			case '\\\\':
-				return NULL;
-			default:
-				escape = 0;
-				break;
+            default:
+                escape = 0;
+                break;
 		}
 	}
 	if(escape != 0 || state == 0)
 		return NULL;
-	str = malloc(sizeof(char)*(*i-beg+1));
+    str = malloc(sizeof(char)*(*i-beg+1));
 	it = &(str[0]);
-	for(; beg < *i - 1; ++beg)
+    for(; beg < *i - 1 && state != 2; ++beg)
 	{
-		char c = js[beg];
+	    char c = js[beg];
 		switch(c)
 		{
-			case '\\':
-				if(escape == 0)
-					escape = 1;
-				else
-				{
-					escape = 0;
-					*it = '\\';
-				}
-				++it;
-				break;
-			case 'b':
-				if(escape == 0)
-					*it = c;
-				else
-				{
-					escape = 0;
-					*it = '\b';
-				}
-				++it;
-				break;
-			case 'n':
-				if(escape == 0)
-					*it = c;
-				else
-				{
-					escape = 0;
-					*it = '\n';
-				}
-				++it;
-				break;
-			case 'f':
-				if(escape == 0)
-					*it = c;
-				else
-				{
-					escape = 0;
-					*it = '\f';
-				}
-				++it;
-				break;
-			case 'r':
-				if(escape == 0)
-					*it = c;
-				else
-				{
-					escape = 0;
-					*it = '\r';
-				}
-				++it;
-				break;
-			case 't':
-				if(escape == 0)
-					*it = c;
-				else
-				{
-					escape = 0;
-					*it = '\t';
-				}
-				++it;
-				break;
-			case '"':
-				if(escape == 0)
-					*it = c;
-				else
-				{
-					escape = 0;
-					*it = '\"';
-				}
-				++it;
-				break;
-			default:
-				*it = c;
-				++it;
-				break;
+            case '\\':
+                ++beg;
+                if(beg < *i - 1)
+                {
+                    c = js[beg];
+                    switch(c)
+                    {
+                        case '"': case '\\': case '/':
+                            *it = c;
+                            break;
+                        case 'b':
+                            *it = '\b';
+                            break;
+                        case 'f':
+                            *it = '\f';
+                            break;
+                        case 'n':
+                            *it = '\n';
+                            break;
+                        case 'r':
+                            *it = '\r';
+                            break;
+                        case 't':
+                            *it = '\t';
+                            break;
+                        case 'u':
+                            if(beg >= *i - 5 || _parse_hexa(js, &beg, &it) != 0) state = 2;
+                            --it;
+                            break;
+                        default:
+                            state = 2;
+                            break;
+                    }
+                    ++it;
+                }
+                break;
+            default:
+                *it = c;
+                ++it;
+                break;
 		}
 	}
-	--(*i);
+	if(state == 2)
+    {
+        free(str);
+        return NULL;
+    }
 	*it = '\0';
-	return str;
+	res = strdup(str);
+	free(str);
+	--(*i);
+	return res;
 }
 
 static cjson* jsonparse_primitive(const char *js, const size_t len, cjson* json, size_t *i)
@@ -382,8 +373,7 @@ static cjson* jsonparse_obj(const char *js, const size_t len, cjson* json, int *
 	char* key = NULL;
 	cjson* item = NULL;
 	int state = 0;
-	int stop = 0;
-	for(; *i < len && js[*i] != '\0' && stop == 0; ++(*i))
+	for(; *i < len && js[*i] != '\0'; ++(*i))
 	{
 		char c = js[*i];
 		switch (c)
@@ -399,7 +389,7 @@ static cjson* jsonparse_obj(const char *js, const size_t len, cjson* json, int *
 					jsonfree(obj);
 					return NULL;
 				}
-				stop = 1;
+				return obj;
 				break;
 			case ',':
 				if(state != 3)
@@ -425,7 +415,7 @@ static cjson* jsonparse_obj(const char *js, const size_t len, cjson* json, int *
 				}
 				++(*i);
 				item = jsonparse_obj(js, len, obj, i);
-				if(item == NULL || install(d->hashtab, key, item) == NULL)
+				if(item == NULL || dictinstall(d->hashtab, key, item) == NULL)
 				{
 					jsonfree(obj);
 					return NULL;
@@ -440,7 +430,7 @@ static cjson* jsonparse_obj(const char *js, const size_t len, cjson* json, int *
 				}
 				++(*i);
 				item = jsonparse_array(js, len, obj, i);
-				if(item == NULL || install(d->hashtab, key, item) == NULL)
+				if(item == NULL || dictinstall(d->hashtab, key, item) == NULL)
 				{
 					jsonfree(obj);
 					return NULL;
@@ -466,7 +456,7 @@ static cjson* jsonparse_obj(const char *js, const size_t len, cjson* json, int *
 					return NULL;
 				}
 				item = jsonparse_value(js, len, obj, i);
-				if(item == NULL || install(d->hashtab, key, item) == NULL)
+				if(item == NULL || dictinstall(d->hashtab, key, item) == NULL)
 				{
 					free(key);
 					jsonfree(item);
@@ -489,7 +479,7 @@ static cjson* jsonparse_obj(const char *js, const size_t len, cjson* json, int *
 					return NULL;
 				}
 				item = jsonparse_primitive(js, len, obj, i);
-				if(item == NULL || install(d->hashtab, key, item) == NULL)
+				if(item == NULL || dictinstall(d->hashtab, key, item) == NULL)
 				{
 					free(key);
 					jsonfree(item);
@@ -526,7 +516,7 @@ static cjson* jsonparse_obj(const char *js, const size_t len, cjson* json, int *
 					else if(state == 2)
 					{
 						item = jsonalloc(JSONSTR, obj, tmp);
-						if(item == NULL || install(d->hashtab, key, item) == NULL)
+						if(item == NULL || dictinstall(d->hashtab, key, item) == NULL)
 						{
 							free(key);
 							jsonfree(item);
@@ -544,20 +534,15 @@ static cjson* jsonparse_obj(const char *js, const size_t len, cjson* json, int *
 				return NULL;
 		}
 	}
-	if(stop == 0)
-	{
-		jsonfree(obj);
-		return NULL;
-	}
-	return obj;
+	jsonfree(obj);
+    return NULL;
 }
 
 static cjson* jsonparse_array(const char *js, const size_t len, cjson* json, size_t *i)
 {
 	cjson* list = jsonalloc(JSONLIST, json, NULL);
 	int comma = 0;
-	int stop = 0;
-	for(; *i < len && js[*i] != '\0' && stop == 0; ++(*i))
+	for(; *i < len && js[*i] != '\0'; ++(*i))
 	{
 		char c = js[*i];
 		switch (c)
@@ -573,7 +558,7 @@ static cjson* jsonparse_array(const char *js, const size_t len, cjson* json, siz
 					jsonfree(list);
 					return NULL;
 				}
-				stop = 1;
+				return list;
 				break;
 			case ',':
 				if(comma != 1)
@@ -622,7 +607,6 @@ static cjson* jsonparse_array(const char *js, const size_t len, cjson* json, siz
 				}
 				++list->size;
 				comma = 1;
-				--(*i);
 				break;
 			case '\"':
 				++(*i);
@@ -640,12 +624,8 @@ static cjson* jsonparse_array(const char *js, const size_t len, cjson* json, siz
 				return NULL;
 		}
 	}
-	if(stop == 0)
-	{
-		jsonfree(list);
-		return NULL;
-	}
-	return list;
+	jsonfree(list);
+    return NULL;
 }
 
 static cjson* jsonparse_value(const char *js, const size_t len, cjson* json, size_t *i)
@@ -665,8 +645,8 @@ static cjson* jsonparse_value(const char *js, const size_t len, cjson* json, siz
 		}
 		else
 		{
-			long *d = malloc(sizeof(long));
-			*d = strtol(str, NULL, 10);
+			int64_t *d = malloc(sizeof(int64_t));
+			*d = strtoull(str, NULL, 10);
 			free(str);
 			return jsonalloc(JSONINT, json, d);
 		}
@@ -681,7 +661,9 @@ static cjson* jsonparse_string(const char *js, const size_t len, cjson* json, si
 	return jsonalloc(JSONSTR, json, str);
 }
 
-static cjson* jsonparse(const char *js, const size_t len)
+
+// manipulate
+static cjson* jsonParse(const char *js, const size_t len)
 {
 	cjson* root = NULL;
 	cjson* current = NULL;
@@ -770,9 +752,7 @@ static cjson* jsonparse(const char *js, const size_t len)
 	return root;
 }
 
-
-// manipulate
-static long* jsonGet(cjson* json)
+static int64_t* jsonGetInt(cjson* json)
 {
 	if(json == NULL || json->type != JSONINT)
 		return NULL;
@@ -793,21 +773,21 @@ static float* jsonGetFloat(cjson* json)
 	return json->ptr;
 }
 
-static char* jsonGetStr(cjson* json)
+static const char* jsonGetStr(cjson* json)
 {
 	if(json == NULL || json->type != JSONSTR)
 		return NULL;
 	return json->ptr;
 }
 
-static char* jsonGetList(cjson* json)
+static cjson** jsonGetList(cjson* json)
 {
 	if(json == NULL || json->type != JSONLIST)
 		return NULL;
 	return json->ptr;
 }
 
-static dict** jsonGetObj(cjson* json)
+static dict* jsonGetObj(cjson* json)
 {
 	if(json == NULL || json->type != JSONOBJ)
 		return NULL;
@@ -828,15 +808,69 @@ static size_t jsonListSize(cjson* json)
 	return json->size;
 }
 
+static int jsonListAppend(cjson* json, cjson* app)
+{
+	if(json == NULL || json->type != JSONLIST || json->size >= JSON_MAX)
+		return -1;
+    ((cjson**)(json->ptr))[json->size] = app;
+    json->size++;
+	return 0;
+}
+
+static int jsonListSet(cjson* json, int index, cjson* add)
+{
+	if(json == NULL || json->type != JSONLIST || index >= json->size || index < 0)
+		return -1;
+    jsonfree(((cjson**)(json->ptr))[index]);
+    ((cjson**)(json->ptr))[index] = add;
+	return 0;
+}
+
 static cjson* jsonObjGet(cjson* json, char* key)
 {
 	if(json == NULL || json->type != JSONOBJ)
 		return NULL;
 	dict *d = json->ptr;
-	dict_entry* de = lookup(d->hashtab, key);
+	dict_entry* de = dictlookup(d->hashtab, key);
 	if(de == NULL)
 		return NULL;
 	return de->item;
+}
+
+static int jsonObjSet(cjson* json, char* key, cjson* set)
+{
+	if(json == NULL || json->type != JSONOBJ)
+		return -1;
+	dict *d = json->ptr;
+	if(dictinstall(d->hashtab, key, set) == NULL)
+		return -1;
+	return 0;
+}
+
+static cjson* jsonRead(const char* filename)
+{
+	FILE* f = fopen(filename, "rb");
+	long int fs;
+	char* buffer;
+	cjson* json;
+
+	if(f == NULL) return NULL;
+	fseek(f, 0, SEEK_END);
+    fs = ftell (f);
+
+    if(fs <= 0) return NULL;
+	fseek(f, 0, SEEK_SET);
+    buffer = malloc(sizeof(char)*fs);
+    if(fread(buffer, 1, fs, f) != fs)
+    {
+        free(buffer);
+        return NULL;
+    }
+
+    json = jsonParse(buffer, fs);
+    free(buffer);
+
+	return json;
 }
 
 #endif
