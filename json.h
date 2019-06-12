@@ -75,7 +75,8 @@ static dict_entry* dictinstall(dict_entry** hashtab, char *key, cjson *item)
 		np->next = hashtab[val];
 		hashtab[val] = np;
 	}
-	else jsonfree(np->item);
+	else
+		jsonfree(np->item);
 	np->item = item;
 	return np;
 }
@@ -205,32 +206,50 @@ static char* _parse_value(const char *js, const size_t len, size_t *i, int *dot)
 
 static int _parse_hexa(const char *js, size_t *i, char** it)
 {
-    int n;
-    char r;
-    for(n = 0; n < 4; ++n)
-    {
-        ++(*i);
-        char c = js[*i];
-        switch(c)
-        {
-            case 'a': case 'b': case 'c': case 'd': case 'e': case 'f':
-                if(n % 2 == 0) r = c - 'a' + 10;
-                else r = (r << 4) +  c - 'a' + 10;
-                break;
-            case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9':
-                if(n % 2 == 0) r = c - '0';
-                else r = (r << 4) +  c - '0';
-                break;
-            default:
-                return -1;
-        }
-        if((n == 1 && r >= 0xc0) || n == 3)
-        {
-            **it = r;
-            ++(*it);
-        }
-    }
-    return 0;
+	int n;
+	char r;
+	for(n = 0; n < 4; ++n)
+	{
+		++(*i);
+		char c = js[*i];
+		switch(c)
+		{
+			case 'a':
+			case 'b':
+			case 'c':
+			case 'd':
+			case 'e':
+			case 'f':
+				if(n % 2 == 0)
+					r = c - 'a' + 10;
+				else
+					r = (r << 4) +  c - 'a' + 10;
+				break;
+			case '0':
+			case '1':
+			case '2':
+			case '3':
+			case '4':
+			case '5':
+			case '6':
+			case '7':
+			case '8':
+			case '9':
+				if(n % 2 == 0)
+					r = c - '0';
+				else
+					r = (r << 4) +  c - '0';
+				break;
+			default:
+				return -1;
+		}
+		if((n == 1 && r >= 0xc0) || n == 3)
+		{
+			**it = r;
+			++(*it);
+		}
+	}
+	return 0;
 }
 
 static char* _parse_string(const char *js, const size_t len, size_t *i)
@@ -244,78 +263,85 @@ static char* _parse_string(const char *js, const size_t len, size_t *i)
 	// get the string length to prepare a buffer
 	for(; *i < len && js[*i] != '\0' && state == 0; ++(*i))
 	{
-	    char c = js[*i];
-        switch(c)
+		char c = js[*i];
+		switch(c)
 		{
 			case '\\':
-				if(escape == 0) escape = 1;
-				else escape = 0;
+				if(escape == 0)
+					escape = 1;
+				else
+					escape = 0;
 				break;
 			case '"':
-				if(escape == 0) state = 1;
-				else escape = 0;
+				if(escape == 0)
+					state = 1;
+				else
+					escape = 0;
 				break;
-            default:
-                escape = 0;
-                break;
+			default:
+				escape = 0;
+				break;
 		}
 	}
 	if(escape != 0 || state == 0)
 		return NULL;
-    str = malloc(sizeof(char)*(*i-beg+1));
+	str = malloc(sizeof(char)*(*i-beg+1));
 	it = &(str[0]);
-    for(; beg < *i - 1 && state != 2; ++beg)
+	for(; beg < *i - 1 && state != 2; ++beg)
 	{
-	    char c = js[beg];
+		char c = js[beg];
 		switch(c)
 		{
-            case '\\':
-                ++beg;
-                if(beg < *i - 1)
-                {
-                    c = js[beg];
-                    switch(c)
-                    {
-                        case '"': case '\\': case '/':
-                            *it = c;
-                            break;
-                        case 'b':
-                            *it = '\b';
-                            break;
-                        case 'f':
-                            *it = '\f';
-                            break;
-                        case 'n':
-                            *it = '\n';
-                            break;
-                        case 'r':
-                            *it = '\r';
-                            break;
-                        case 't':
-                            *it = '\t';
-                            break;
-                        case 'u':
-                            if(beg >= *i - 5 || _parse_hexa(js, &beg, &it) != 0) state = 2;
-                            --it;
-                            break;
-                        default:
-                            state = 2;
-                            break;
-                    }
-                    ++it;
-                }
-                break;
-            default:
-                *it = c;
-                ++it;
-                break;
+			case '\\':
+				++beg;
+				if(beg < *i - 1)
+				{
+					c = js[beg];
+					switch(c)
+					{
+						case '"':
+						case '\\':
+						case '/':
+							*it = c;
+							break;
+						case 'b':
+							*it = '\b';
+							break;
+						case 'f':
+							*it = '\f';
+							break;
+						case 'n':
+							*it = '\n';
+							break;
+						case 'r':
+							*it = '\r';
+							break;
+						case 't':
+							*it = '\t';
+							break;
+						case 'u':
+							if(beg >= *i - 5 || _parse_hexa(js, &beg, &it) != 0)
+								state = 2;
+							--it;
+							break;
+						default:
+							state = 2;
+							break;
+					}
+					++it;
+				}
+				break;
+			default:
+				*it = c;
+				++it;
+				break;
 		}
 	}
 	if(state == 2)
-    {
-        free(str);
-        return NULL;
-    }
+	{
+		free(str);
+		return NULL;
+	}
 	*it = '\0';
 	res = strdup(str);
 	free(str);
@@ -535,7 +561,7 @@ static cjson* jsonparse_obj(const char *js, const size_t len, cjson* json, int *
 		}
 	}
 	jsonfree(obj);
-    return NULL;
+	return NULL;
 }
 
 static cjson* jsonparse_array(const char *js, const size_t len, cjson* json, size_t *i)
@@ -625,7 +651,7 @@ static cjson* jsonparse_array(const char *js, const size_t len, cjson* json, siz
 		}
 	}
 	jsonfree(list);
-    return NULL;
+	return NULL;
 }
 
 static cjson* jsonparse_value(const char *js, const size_t len, cjson* json, size_t *i)
@@ -812,8 +838,8 @@ static int jsonListAppend(cjson* json, cjson* app)
 {
 	if(json == NULL || json->type != JSONLIST || json->size >= JSON_MAX)
 		return -1;
-    ((cjson**)(json->ptr))[json->size] = app;
-    json->size++;
+	((cjson**)(json->ptr))[json->size] = app;
+	json->size++;
 	return 0;
 }
 
@@ -821,8 +847,8 @@ static int jsonListSet(cjson* json, int index, cjson* add)
 {
 	if(json == NULL || json->type != JSONLIST || index >= json->size || index < 0)
 		return -1;
-    jsonfree(((cjson**)(json->ptr))[index]);
-    ((cjson**)(json->ptr))[index] = add;
+	jsonfree(((cjson**)(json->ptr))[index]);
+	((cjson**)(json->ptr))[index] = add;
 	return 0;
 }
 
@@ -854,21 +880,23 @@ static cjson* jsonRead(const char* filename)
 	char* buffer;
 	cjson* json;
 
-	if(f == NULL) return NULL;
+	if(f == NULL)
+		return NULL;
 	fseek(f, 0, SEEK_END);
-    fs = ftell (f);
+	fs = ftell (f);
 
-    if(fs <= 0) return NULL;
+	if(fs <= 0)
+		return NULL;
 	fseek(f, 0, SEEK_SET);
-    buffer = malloc(sizeof(char)*fs);
-    if(fread(buffer, 1, fs, f) != fs)
-    {
-        free(buffer);
-        return NULL;
-    }
+	buffer = malloc(sizeof(char)*fs);
+	if(fread(buffer, 1, fs, f) != fs)
+	{
+		free(buffer);
+		return NULL;
+	}
 
-    json = jsonParse(buffer, fs);
-    free(buffer);
+	json = jsonParse(buffer, fs);
+	free(buffer);
 
 	return json;
 }
