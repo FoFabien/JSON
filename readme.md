@@ -19,7 +19,7 @@ cjson *json = jsonParse(your_json_string, strlen(your_json_string));
 ```  
 Don't forget to free the memory once you are done:  
 ```c
-jsonfree(json);
+jsonFree(json);
 ```  
   
 * Writing:  
