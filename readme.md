@@ -11,11 +11,11 @@ Simply `#include "json.h"`.
 * Reading:  
 You can do either:
 ```c
-cjson *json = jsonRead(your_file);
+hjson *json = jsonRead(your_file);
 ```  
 or  
 ```c
-cjson *json = jsonParse(your_json_string, strlen(your_json_string));
+hjson *json = jsonParse(your_json_string, strlen(your_json_string));
 ```  
 Don't forget to free the memory once you are done:  
 ```c
