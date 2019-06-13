@@ -1,7 +1,10 @@
 #ifndef JSON_H_INCLUDED
 #define JSON_H_INCLUDED
 
+#include <stdlib.h>
+#include <stdio.h>
 #include <stdint.h>
+#include <string.h>
 
 // types definitions
 typedef enum
