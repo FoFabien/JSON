@@ -6,6 +6,7 @@ static const char *TEST_JSON =
     "{"
     "\"string\" : \"hello world!\","
     "\"exp\" : 0.13674E+3,"
+    "\"unicode\" : \"test: \\ud83c\","
     "\"pi\" : 3.14159265359,"
     "\"number\" : -56340,"
     "\"array\" : ["

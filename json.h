@@ -203,6 +203,7 @@ static double _parse_value(const char *js, const size_t len, size_t *i, char* er
     int state = 0;
     int sign = 0;
     int num = 0;
+    float decimal = 10.f;
     size_t beg = *i;
     for(; *i < len && js[*i] != '\0' && state == 0; ++(*i))
     {
@@ -233,8 +234,8 @@ static double _parse_value(const char *js, const size_t len, size_t *i, char* er
                 if(dot == 0) d = d * 10 + (c - '0');
                 else
                 {
-                    d = d + (c - '0') * pow(0.1, dot);
-                    dot++;
+                    d = d + (c - '0') / decimal;
+                    decimal *= 10.f;
                 }
                 break;
             case 'e':
@@ -314,7 +315,7 @@ parse_value_err:
 static int _parse_hexa(const char *js, size_t *i, char** it)
 {
     int n;
-    char r = 0;
+    unsigned char r;
     for(n = 0; n < 4; ++n)
     {
         ++(*i);
@@ -1120,11 +1121,33 @@ static int _write_primitive(FILE* f, cjson* json)
     return 0;
 }
 
+// write an unicode character
+static int _write_hexa(FILE* f, unsigned char byte1, unsigned char byte2) // unsigned cast is important
+{
+    char c[4];
+    fwrite("\\u", 1, 2, f);
+    c[0] = (byte1 >> 4) & 0x0f;
+    if(c[0] >= 10) c[0] += 'a' - 10;
+    else c[0] += '0';
+    c[1] = byte1 & 0x0f;
+    if(c[1] >= 10) c[1] += 'a' - 10;
+    else c[1] += '0';
+    c[2] = (byte2 >> 4) & 0x0f;
+    if(c[2] >= 10) c[2] += 'a' - 10;
+    else c[2] += '0';
+    c[3] = byte2 & 0x0f;
+    if(c[3] >= 10) c[3] += 'a' - 10;
+    else c[3] += '0';
+    fwrite(c, 1, 4, f);
+    return 0;
+}
+
 static int _write_string(FILE* f, cjson* json)
 {
     char* str = json->ptr;
     size_t ss = strlen(str);
     int i;
+    static const char l = 0xc0;
     fwrite("\"", 1, 1, f);
     for(i = 0; i < ss; ++i)
     {
@@ -1156,8 +1179,13 @@ static int _write_string(FILE* f, cjson* json)
                 fwrite("\\t", 1, 2, f);
                 break;
             default:
-                // to do: \u
-                fwrite(&c, 1, 1, f);
+                if((c & 0xff) >= 0xc0)
+                {
+                    if(i >= ss - 1) return -1;
+                    ++i; // we need 2 characters
+                    _write_hexa(f, c, str[i]);
+                }
+                else fwrite(&c, 1, 1, f);
                 break;
         }
     }
@@ -1202,9 +1230,7 @@ static int jsonWrite(const char* filename, cjson* json)
         default:
             return -1;
     }
-
     fclose(f);
-
     return 0;
 }
 
