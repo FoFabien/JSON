@@ -1147,7 +1147,6 @@ static int _write_string(FILE* f, cjson* json)
     char* str = json->ptr;
     size_t ss = strlen(str);
     int i;
-    static const char l = 0xc0;
     fwrite("\"", 1, 1, f);
     for(i = 0; i < ss; ++i)
     {
