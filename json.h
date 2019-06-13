@@ -24,46 +24,52 @@ typedef struct
 {
     jsontype type;
     void* ptr;
-    size_t size;
-} cjson; // json object. size is only used by the list type. ptr can be anything
+} hjson; // json object. size is only used by the list type. ptr can be anything
 
 typedef struct
 {
     void *next;
     char *key;
-    cjson *item;
-} dict_entry; // dictionary key/value pair
+    hjson *item;
+} jdict_entry; // dictionary key/value pair
 
 typedef struct
 {
-    dict_entry **hashtab;
-    size_t size;
-} dict; // dictionary object used for json objects, in a python like fashion
+    jdict_entry **hashtab;
+} jdict; // dictionary object used for json objects, in a python like fashion
 
-#define JSON_MAX 64 // max size of a json list (TODO: dynamic resizing?)
+typedef struct
+{
+    hjson** list;
+    size_t size;
+    size_t reserved;
+} jlist; // list object used for json lists
+
+#define LISTSIZE 10 // default size of a json list
 #define HASHSIZE 100 // size of the hash table. bigger = less risk of collision but higher memory usage
 
 // functions declarations
 static double _parse_value(const char *js, const size_t len, size_t *i, char* err);
 static int _parse_hexa(const char *js, size_t *i, char** it);
 static char* _parse_string(const char *js, const size_t len, size_t *i);
-static cjson* jsonparse_primitive(const char *js, const size_t len, cjson* json, size_t *i);
 
-static void jsonFree(cjson* json);
-static cjson* jsonparse_value(const char *js, const size_t len, cjson* json, size_t *i);
-static cjson* jsonparse_string(const char *js, const size_t len, cjson* json, size_t *i);
-static cjson* jsonparse_array(const char *js, const size_t len, cjson* json, size_t *i);
-static cjson* jsonparse_obj(const char *js, const size_t len, cjson* json, size_t *i);
+static void jsonFree(hjson* json);
+static hjson* jsonparse_primitive(const char *js, const size_t len, size_t *i);
+static hjson* jsonparse_value(const char *js, const size_t len, size_t *i);
+static hjson* jsonparse_string(const char *js, const size_t len, size_t *i);
+static hjson* jsonparse_array(const char *js, const size_t len, size_t *i);
+static hjson* jsonparse_obj(const char *js, const size_t len, size_t *i);
 
-static int _write_obj(FILE* f, cjson* json);
-static int _write_array(FILE* f, cjson* json);
-static int _write_value(FILE* f, cjson* json);
-static int _write_primitive(FILE* f, cjson* json);
-static int _write_string(FILE* f, cjson* json);
-static int _write_obj(FILE* f, cjson* json);
+static int _write_obj(FILE* f, hjson* json);
+static int _write_array(FILE* f, hjson* json);
+static int _write_value(FILE* f, hjson* json);
+static int _write_primitive(FILE* f, hjson* json);
+static int _write_string(FILE* f, hjson* json);
+static int _write_obj(FILE* f, hjson* json);
 
+// dictionary functions
 // hash a string
-static unsigned dicthash(char *s)
+static unsigned jdicthash(char *s)
 {
     unsigned val;
     for (val = 0; *s != '\0'; s++)
@@ -72,71 +78,119 @@ static unsigned dicthash(char *s)
 }
 
 // search an element in the dictionary
-static dict_entry* dictlookup(dict_entry** hashtab, char* s)
+static jdict_entry* jdictlookup(jdict_entry** hashtab, char* s)
 {
-    dict_entry* entry;
-    for (entry = hashtab[dicthash(s)]; entry != NULL; entry = entry->next)
+    jdict_entry* entry;
+    for (entry = hashtab[jdicthash(s)]; entry != NULL; entry = entry->next)
         if(strcmp(s, entry->key) == 0)
             return entry;
     return NULL;
 }
 
 // add a new element in the dictionary. previous one with the same key is deleted.
-static dict_entry* dictinstall(dict_entry** hashtab, char *key, cjson *item)
+static jdict_entry* jdictinstall(jdict_entry** hashtab, char *key, hjson *item)
 {
-    dict_entry* entry = NULL;
+    jdict_entry* entry = NULL;
     unsigned val;
-    if((entry = dictlookup(hashtab, key)) == NULL)
+    if((entry = jdictlookup(hashtab, key)) == NULL)
     {
-        entry = malloc(sizeof(dict_entry));
+        entry = malloc(sizeof(jdict_entry));
         if (entry == NULL || (entry->key = strdup(key)) == NULL)
             return NULL;
-        val = dicthash(key);
-        entry->next = hashtab[val]; // (TOCHECK)
+        val = jdicthash(key);
+        entry->next = hashtab[val];
         hashtab[val] = entry;
     }
-    else
-        jsonFree(entry->item);
+    else jsonFree(entry->item);
     entry->item = item;
     return entry;
 }
 
 // remove an element
-static void dictuninstall(dict_entry** hashtab, char *key)
+static void jdictuninstall(jdict_entry** hashtab, char *key)
 {
-    dict_entry* entry = NULL;
+    jdict_entry* entry = NULL;
     unsigned val;
-    if((entry = dictlookup(hashtab, key)) != NULL)
+    if((entry = jdictlookup(hashtab, key)) != NULL)
     {
         jsonFree(entry->item);
         free(entry);
-        val = dicthash(key);
+        val = jdicthash(key);
         hashtab[val] = NULL;
     }
 }
 
+// alloc the struct
+static jdict* jdictalloc()
+{
+    jdict* d = malloc(sizeof(jdict));
+    d->hashtab = calloc(HASHSIZE, sizeof(jdict_entry*));
+    return d;
+}
+
 // free the memory
-static void dictfree(dict* d)
+static void jdictfree(jdict* d)
 {
     int i;
-    for(i = 0; i < HASHSIZE && d->size; ++i)
+    for(i = 0; i < HASHSIZE; ++i)
     {
-        dict_entry* entry = NULL;
-        for(entry = d->hashtab[i]; entry != NULL; entry = entry->next)
+        jdict_entry* entry = NULL;
+        for(entry = d->hashtab[i]; entry != NULL;)
         {
-            jsonFree(entry->item);
-            free(entry->key);
-            free(entry);
+            jdict_entry* to_free = entry;
+            entry = entry->next;
+            jsonFree(to_free->item);
+            free(to_free->key);
+            free(to_free);
         }
     }
     free(d->hashtab);
     free(d);
 }
 
-// create a json object of the specified type
-static cjson* jsonalloc(jsontype type, void* init_value)
+// list functions
+// increase the max size
+static void jlist_up_reserve(jlist* l)
 {
-    cjson* json = malloc(sizeof(cjson));
+    hjson** list = malloc(l->reserved*2*sizeof(hjson*));
+    memcpy(list, l->list, l->size*sizeof(hjson*));
+    free(l->list);
+    l->list = list;
+    l->reserved *= 2;
+}
+
+// append an element
+static void jlist_append(jlist* l, hjson* json)
+{
+    if(l->size >= l->reserved) jlist_up_reserve(l);
+    l->list[l->size] = json;
+    l->size++;
+}
+
+// alloc the struct
+static jlist* jlistalloc()
+{
+    jlist* l = malloc(sizeof(jlist));
+    l->reserved = LISTSIZE;
+    l->list = malloc(sizeof(hjson*)*LISTSIZE);
+    l->size = 0;
+    return l;
+}
+
+// free the memory
+static void jlistfree(jlist* l)
+{
+    size_t i;
+    for(i = 0; i < l->size; ++i)
+        jsonFree(l->list[i]);
+    free(l->list);
+    free(l);
+}
+
+// create a json object of the specified type
+static hjson* jsonalloc(jsontype type, void* init_value)
+{
+    hjson* json = malloc(sizeof(hjson));
     json->type = type;
     switch(json->type)
     {
@@ -144,13 +198,10 @@ static cjson* jsonalloc(jsontype type, void* init_value)
             free(json);
             return NULL;
         case JSONOBJ:
-            json->ptr = malloc(sizeof(dict));
-            ((dict*)(json->ptr))->size = 0;
-            ((dict*)(json->ptr))->hashtab = calloc(HASHSIZE, sizeof(dict_entry*));
+            json->ptr = jdictalloc();
             break;
         case JSONLIST:
-            json->ptr = malloc(sizeof(cjson*)*JSON_MAX);
-            json->size = 0;
+            json->ptr = jlistalloc();
             break;
         case JSONSTR:
         case JSONPRIM:
@@ -164,10 +215,8 @@ static cjson* jsonalloc(jsontype type, void* init_value)
 }
 
 // free the object and its childs if any
-static void jsonFree(cjson* json)
+static void jsonFree(hjson* json)
 {
-    int i;
-    cjson** array;
     if(json == NULL)
         return;
     switch(json->type)
@@ -175,13 +224,10 @@ static void jsonFree(cjson* json)
         case JSONUNDEF:
             break;
         case JSONOBJ:
-            dictfree(json->ptr);
+            jdictfree(json->ptr);
             break;
         case JSONLIST:
-            array = (cjson**)json->ptr;
-            for(i = 0; i < JSON_MAX && i < json->size; ++i)
-                jsonFree(array[i]);
-            free(json->ptr);
+            jlistfree(json->ptr);
             break;
         case JSONSTR:
         case JSONPRIM:
@@ -249,6 +295,8 @@ static double _parse_value(const char *js, const size_t len, size_t *i, char* er
             case '\n':
             case ' ':
             case ',':
+            case '}':
+            case ']':
                 state = 1;
                 break;
             default:
@@ -294,6 +342,8 @@ static double _parse_value(const char *js, const size_t len, size_t *i, char* er
                 case '\n':
                 case ' ':
                 case ',':
+                case '}':
+                case ']':
                     state = 1;
                     break;
                 default:
@@ -459,7 +509,7 @@ static char* _parse_string(const char *js, const size_t len, size_t *i)
 }
 
 // read either a json boolean or null value
-static cjson* jsonparse_primitive(const char *js, const size_t len, cjson* json, size_t *i)
+static hjson* jsonparse_primitive(const char *js, const size_t len, size_t *i)
 {
     switch(js[*i])
     {
@@ -503,12 +553,12 @@ static cjson* jsonparse_primitive(const char *js, const size_t len, cjson* json,
 }
 
 // read a json object
-static cjson* jsonparse_obj(const char *js, const size_t len, cjson* json, size_t *i)
+static hjson* jsonparse_obj(const char *js, const size_t len, size_t *i)
 {
-    cjson* obj = jsonalloc(JSONOBJ, NULL);
-    dict* d = obj->ptr;
+    hjson* obj = jsonalloc(JSONOBJ, NULL);
+    jdict* d = obj->ptr;
     char* key = NULL;
-    cjson* item = NULL;
+    hjson* item = NULL;
     int state = 0;
     for(; *i < len && js[*i] != '\0'; ++(*i))
     {
@@ -521,7 +571,7 @@ static cjson* jsonparse_obj(const char *js, const size_t len, cjson* json, size_
             case ' ':
                 break;
             case '}':
-                if(d->size > 0 && state != 3)
+                if(state != 3)
                     goto obj_err;
                 return obj;
                 break;
@@ -539,8 +589,8 @@ static cjson* jsonparse_obj(const char *js, const size_t len, cjson* json, size_
                 if(state != 2)
                     goto obj_err;
                 ++(*i);
-                item = jsonparse_obj(js, len, obj, i);
-                if(item == NULL || dictinstall(d->hashtab, key, item) == NULL)
+                item = jsonparse_obj(js, len, i);
+                if(item == NULL || jdictinstall(d->hashtab, key, item) == NULL)
                     goto obj_err;
                 free(key);
                 key = NULL;
@@ -551,8 +601,8 @@ static cjson* jsonparse_obj(const char *js, const size_t len, cjson* json, size_
                 if(state != 2)
                     goto obj_err;
                 ++(*i);
-                item = jsonparse_array(js, len, obj, i);
-                if(item == NULL || dictinstall(d->hashtab, key, item) == NULL)
+                item = jsonparse_array(js, len, i);
+                if(item == NULL || jdictinstall(d->hashtab, key, item) == NULL)
                     goto obj_err;
                 free(key);
                 key = NULL;
@@ -572,8 +622,8 @@ static cjson* jsonparse_obj(const char *js, const size_t len, cjson* json, size_
             case '9':
                 if(state != 2)
                     goto obj_err;
-                item = jsonparse_value(js, len, obj, i);
-                if(item == NULL || dictinstall(d->hashtab, key, item) == NULL)
+                item = jsonparse_value(js, len, i);
+                if(item == NULL || jdictinstall(d->hashtab, key, item) == NULL)
                     goto obj_err;
                 --(*i);
                 free(key);
@@ -586,8 +636,8 @@ static cjson* jsonparse_obj(const char *js, const size_t len, cjson* json, size_
             case 'n':
                 if(state != 2)
                     goto obj_err;
-                item = jsonparse_primitive(js, len, obj, i);
-                if(item == NULL || dictinstall(d->hashtab, key, item) == NULL)
+                item = jsonparse_primitive(js, len, i);
+                if(item == NULL || jdictinstall(d->hashtab, key, item) == NULL)
                     goto obj_err;
                 free(key);
                 key = NULL;
@@ -610,7 +660,7 @@ static cjson* jsonparse_obj(const char *js, const size_t len, cjson* json, size_
                     else if(state == 2)
                     {
                         item = jsonalloc(JSONSTR, tmp);
-                        if(item == NULL || dictinstall(d->hashtab, key, item) == NULL)
+                        if(item == NULL || jdictinstall(d->hashtab, key, item) == NULL)
                             goto obj_err;
                         free(key);
                         key = NULL;
@@ -631,9 +681,10 @@ obj_err:
 }
 
 // read a json list
-static cjson* jsonparse_array(const char *js, const size_t len, cjson* json, size_t *i)
+static hjson* jsonparse_array(const char *js, const size_t len, size_t *i)
 {
-    cjson* list = jsonalloc(JSONLIST, NULL);
+    hjson* list = jsonalloc(JSONLIST, NULL);
+    jlist* l = list->ptr;
     int comma = 0;
     for(; *i < len && js[*i] != '\0'; ++(*i))
     {
@@ -646,7 +697,7 @@ static cjson* jsonparse_array(const char *js, const size_t len, cjson* json, siz
             case ' ':
                 break;
             case ']':
-                if(list->size > 0 && comma == 0)
+                if(l->size > 0 && comma == 0)
                     goto list_err;
                 return list;
                 break;
@@ -657,18 +708,16 @@ static cjson* jsonparse_array(const char *js, const size_t len, cjson* json, siz
                 break;
             case '{':
                 ++(*i);
-                ((cjson**)(list->ptr))[list->size] = jsonparse_obj(js, len, list, i);
-                if(((cjson**)(list->ptr))[list->size] == NULL)
+                jlist_append(l, jsonparse_obj(js, len, i));
+                if(l->list[l->size-1] == NULL)
                     goto list_err;
-                ++list->size;
                 comma = 1;
                 break;
             case '[':
                 ++(*i);
-                ((cjson**)(list->ptr))[list->size] = jsonparse_array(js, len, list, i);
-                if(((cjson**)(list->ptr))[list->size] == NULL)
+                jlist_append(l, jsonparse_array(js, len, i));
+                if(l->list[l->size-1] == NULL)
                     goto list_err;
-                ++list->size;
                 comma = 1;
                 break;
             case '-':
@@ -682,28 +731,25 @@ static cjson* jsonparse_array(const char *js, const size_t len, cjson* json, siz
             case '7':
             case '8':
             case '9':
-                ((cjson**)(list->ptr))[list->size] = jsonparse_value(js, len, list, i);
-                if(((cjson**)(list->ptr))[list->size] == NULL)
+                jlist_append(l, jsonparse_value(js, len, i));
+                if(l->list[l->size-1] == NULL)
                     goto list_err;
-                ++list->size;
                 comma = 1;
                 --(*i);
                 break;
             case 't':
             case 'f':
             case 'n':
-                ((cjson**)(list->ptr))[list->size] = jsonparse_primitive(js, len, list, i);
-                if(((cjson**)(list->ptr))[list->size] == NULL)
+                jlist_append(l, jsonparse_primitive(js, len, i));
+                if(l->list[l->size-1] == NULL)
                     goto list_err;
-                ++list->size;
                 comma = 1;
                 break;
             case '\"':
                 ++(*i);
-                ((cjson**)(list->ptr))[list->size] = jsonparse_string(js, len, list, i);
-                if(((cjson**)(list->ptr))[list->size] == NULL)
+                jlist_append(l, jsonparse_string(js, len, i));
+                if(l->list[l->size-1] == NULL)
                     goto list_err;
-                ++list->size;
                 comma = 1;
                 break;
             default:
@@ -716,7 +762,7 @@ list_err:
 }
 
 // call _parse_value and create either an integer or float json object
-static cjson* jsonparse_value(const char *js, const size_t len, cjson* json, size_t *i)
+static hjson* jsonparse_value(const char *js, const size_t len, size_t *i)
 {
     char err = 0;
     double d = _parse_value(js, len, i, &err);
@@ -740,7 +786,7 @@ static cjson* jsonparse_value(const char *js, const size_t len, cjson* json, siz
 }
 
 // call _parse_string and create either a string json object
-static cjson* jsonparse_string(const char *js, const size_t len, cjson* json, size_t *i)
+static hjson* jsonparse_string(const char *js, const size_t len, size_t *i)
 {
     char *str = _parse_string(js, len, i);
     if(str == NULL)
@@ -750,10 +796,10 @@ static cjson* jsonparse_string(const char *js, const size_t len, cjson* json, si
 
 
 // transform your string into a json object
-static cjson* jsonParse(const char *js, const size_t len)
+static hjson* jsonParse(const char *js, const size_t len)
 {
-    cjson* root = NULL;
-    cjson* current = NULL;
+    hjson* root = NULL;
+    hjson* current = NULL;
     size_t i;
 
     for(i = 0; i < len && js[i] != '\0'; ++i)
@@ -768,7 +814,7 @@ static cjson* jsonParse(const char *js, const size_t len)
                 break;
             case '{':
                 ++i;
-                current = jsonparse_obj(js, len, current, &i);
+                current = jsonparse_obj(js, len, &i);
                 if(current == NULL)
                     goto parse_err;
                 if(root == NULL)
@@ -776,7 +822,7 @@ static cjson* jsonParse(const char *js, const size_t len)
                 break;
             case '[':
                 ++i;
-                current = jsonparse_array(js, len, current, &i);
+                current = jsonparse_array(js, len, &i);
                 if(current == NULL)
                     goto parse_err;
                 if(root == NULL)
@@ -793,7 +839,7 @@ static cjson* jsonParse(const char *js, const size_t len)
             case '7':
             case '8':
             case '9':
-                current = jsonparse_value(js, len, current, &i);
+                current = jsonparse_value(js, len, &i);
                 if(current == NULL)
                     goto parse_err;
                 if(root == NULL)
@@ -802,7 +848,7 @@ static cjson* jsonParse(const char *js, const size_t len)
             case 't':
             case 'f':
             case 'n':
-                current = jsonparse_primitive(js, len, current, &i);
+                current = jsonparse_primitive(js, len, &i);
                 if(current == NULL)
                     goto parse_err;
                 if(root == NULL)
@@ -810,7 +856,7 @@ static cjson* jsonParse(const char *js, const size_t len)
                 break;
             case '\"':
                 ++i;
-                current = jsonparse_string(js, len, current, &i);
+                current = jsonparse_string(js, len, &i);
                 if(current == NULL)
                     goto parse_err;
                 if(root == NULL)
@@ -827,7 +873,7 @@ parse_err:
 }
 
 // get a pointer to the integer (for integer json objects)
-static int64_t* jsonGetInt(cjson* json)
+static int64_t* jsonGetInt(hjson* json)
 {
     if(json == NULL || json->type != JSONINT)
         return NULL;
@@ -835,7 +881,7 @@ static int64_t* jsonGetInt(cjson* json)
 }
 
 // get a pointer to the boolean (for boolean json objects)
-static char* jsonGetBool(cjson* json)
+static char* jsonGetBool(hjson* json)
 {
     if(json == NULL || json->type != JSONBOOL)
         return NULL;
@@ -843,7 +889,7 @@ static char* jsonGetBool(cjson* json)
 }
 
 // get a pointer to the double (for floating json objects)
-static double* jsonGetFloat(cjson* json)
+static double* jsonGetFloat(hjson* json)
 {
     if(json == NULL || json->type != JSONFLOAT)
         return NULL;
@@ -851,7 +897,7 @@ static double* jsonGetFloat(cjson* json)
 }
 
 // get the string (for string json objects)
-static const char* jsonGetStr(cjson* json)
+static const char* jsonGetStr(hjson* json)
 {
     if(json == NULL || json->type != JSONSTR)
         return NULL;
@@ -859,7 +905,7 @@ static const char* jsonGetStr(cjson* json)
 }
 
 // get the list (for list json objects)
-static cjson** jsonGetList(cjson* json)
+static jlist* jsonGetList(hjson* json)
 {
     if(json == NULL || json->type != JSONLIST)
         return NULL;
@@ -867,7 +913,7 @@ static cjson** jsonGetList(cjson* json)
 }
 
 // get the dictionary (for json objects)
-static dict* jsonGetObj(cjson* json)
+static jdict* jsonGetObj(hjson* json)
 {
     if(json == NULL || json->type != JSONOBJ)
         return NULL;
@@ -875,7 +921,7 @@ static dict* jsonGetObj(cjson* json)
 }
 
 // return 1 if it's a null value
-static int jsonIsNull(cjson* json)
+static int jsonIsNull(hjson* json)
 {
     if(json == NULL || json->type != JSONPRIM)
         return 0;
@@ -883,72 +929,74 @@ static int jsonIsNull(cjson* json)
 }
 
 // return the list size (0 if not a list)
-static size_t jsonListSize(cjson* json)
+static size_t jsonListSize(hjson* json)
 {
     if(json == NULL || json->type != JSONLIST)
         return 0;
-    return json->size;
+    jlist* l = json->ptr;
+    return l->size;
 }
 
 // append a json object to a json list (in the limit defined by JSON_MAX)
-static int jsonListAppend(cjson* json, cjson* app)
+static void jsonListAppend(hjson* json, hjson* app)
 {
-    if(json == NULL || json->type != JSONLIST || json->size >= JSON_MAX)
-        return -1;
-    ((cjson**)(json->ptr))[json->size] = app;
-    json->size++;
-    return 0;
+    if(json == NULL || json->type != JSONLIST)
+        return;
+    jlist* l = json->ptr;
+    jlist_append(l, app);
 }
 
 // set an element in a json list (previous one will be free)
-static int jsonListSet(cjson* json, int index, cjson* add)
+static int jsonListSet(hjson* json, int index, hjson* add)
 {
-    if(json == NULL || json->type != JSONLIST || index >= json->size || index < 0)
+    if(json == NULL || json->type != JSONLIST)
         return -1;
-    jsonFree(((cjson**)(json->ptr))[index]);
-    ((cjson**)(json->ptr))[index] = add;
+    jlist* l = json->ptr;
+    if(index >= l->size || index < 0)
+        return -1;
+    l->list[index] = add;
     return 0;
 }
 
 // get the item in a json object
-static cjson* jsonObjGet(cjson* json, char* key)
+static hjson* jsonObjGet(hjson* json, char* key)
 {
     if(json == NULL || json->type != JSONOBJ)
         return NULL;
-    dict *d = json->ptr;
-    dict_entry* de = dictlookup(d->hashtab, key);
+    jdict *d = json->ptr;
+    jdict_entry* de = jdictlookup(d->hashtab, key);
     if(de == NULL)
         return NULL;
     return de->item;
 }
 
 // set an item in a json object
-static int jsonObjSet(cjson* json, char* key, cjson* set)
+static int jsonObjSet(hjson* json, char* key, hjson* set)
 {
     if(json == NULL || json->type != JSONOBJ)
         return -1;
-    dict *d = json->ptr;
-    if(dictinstall(d->hashtab, key, set) == NULL)
+    jdict *d = json->ptr;
+    if(jdictinstall(d->hashtab, key, set) == NULL)
         return -1;
     return 0;
 }
 
 // delete an item in a json object
-static void jsonObjDel(cjson* json, char* key)
+static void jsonObjDel(hjson* json, char* key)
 {
     if(json == NULL || json->type != JSONOBJ)
         return;
-    dict *d = json->ptr;
-    dictuninstall(d->hashtab, key);
+    jdict *d = json->ptr;
+    jdictuninstall(d->hashtab, key);
 }
 
 // read a file on disk and create a json object
-static cjson* jsonRead(const char* filename)
+static hjson* jsonRead(const char* filename)
 {
     FILE* f = fopen(filename, "rb");
     long int fs;
     char* buffer;
-    cjson* json;
+    hjson* json;
 
     if(f == NULL)
         return NULL;
@@ -973,10 +1021,10 @@ static cjson* jsonRead(const char* filename)
 }
 
 // write an object
-static int _write_obj(FILE* f, cjson* json)
+static int _write_obj(FILE* f, hjson* json)
 {
-    dict* d = jsonGetObj(json);
-    dict_entry* elem;
+    jdict* d = jsonGetObj(json);
+    jdict_entry* elem;
     size_t i;
     size_t first = 0;
     fwrite("{", 1, 1, f);
@@ -1028,12 +1076,13 @@ static int _write_obj(FILE* f, cjson* json)
 }
 
 // write a list
-static int _write_array(FILE* f, cjson* json)
+static int _write_array(FILE* f, hjson* json)
 {
-    cjson** l = jsonGetList(json);
+    jlist* ptr = jsonGetList(json);
+    hjson** l = ptr->list;
     size_t i;
     fwrite("[", 1, 1, f);
-    for (i = 0; i < json->size; ++i)
+    for (i = 0; i < ptr->size; ++i)
     {
         switch(l[i]->type)
         {
@@ -1064,7 +1113,7 @@ static int _write_array(FILE* f, cjson* json)
             default:
                 return -1;
         }
-        if(i != json->size-1)
+        if(i != ptr->size-1)
             fwrite(", ", 1, 2, f);
     }
     fwrite("]", 1, 1, f);
@@ -1072,7 +1121,7 @@ static int _write_array(FILE* f, cjson* json)
 }
 
 // write either a float or int value
-static int _write_value(FILE* f, cjson* json)
+static int _write_value(FILE* f, hjson* json)
 {
     char buf[60];
     switch(json->type)
@@ -1097,7 +1146,7 @@ static int _write_value(FILE* f, cjson* json)
 }
 
 // write either a boolean or null value
-static int _write_primitive(FILE* f, cjson* json)
+static int _write_primitive(FILE* f, hjson* json)
 {
     switch(json->type)
     {
@@ -1142,7 +1191,7 @@ static int _write_hexa(FILE* f, unsigned char byte1, unsigned char byte2) // uns
     return 0;
 }
 
-static int _write_string(FILE* f, cjson* json)
+static int _write_string(FILE* f, hjson* json)
 {
     char* str = json->ptr;
     size_t ss = strlen(str);
@@ -1193,7 +1242,7 @@ static int _write_string(FILE* f, cjson* json)
 }
 
 // write a file on disk from a json object
-static int jsonWrite(const char* filename, cjson* json)
+static int jsonWrite(const char* filename, hjson* json)
 {
     FILE* f = fopen(filename, "wb");
 

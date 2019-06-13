@@ -15,7 +15,7 @@ static const char *TEST_JSON =
     "\"boolean\" : true"
     "}";
 
-void print(cjson* json, int indent)
+void print(hjson* json, int indent)
 {
     int i;
     for(i = 0; i < indent; ++i)
@@ -26,8 +26,8 @@ void print(cjson* json, int indent)
         {
             case JSONOBJ:
                 {
-                    dict* d = jsonGetObj(json);
-                    dict_entry* elem;
+                    jdict* d = jsonGetObj(json);
+                    jdict_entry* elem;
                     printf("{\n");
                     size_t j;
                     for(j = 0; j < HASHSIZE; ++j)
@@ -48,11 +48,11 @@ void print(cjson* json, int indent)
                 }
             case JSONLIST:
                 {
-                    cjson** l = jsonGetList(json);
+                    jlist* l = jsonGetList(json);
                     size_t j;
                     printf("[\n");
-                    for (j = 0; j < json->size; ++j)
-                        print(l[j], indent);
+                    for (j = 0; j < l->size; ++j)
+                        print(l->list[j], indent);
                     for(i = 0; i < indent; ++i)
                         printf("\t");
                     printf("]\n");
@@ -96,10 +96,10 @@ void print(cjson* json, int indent)
 
 int main()
 {
-    cjson *json = jsonParse(TEST_JSON, strlen(TEST_JSON));
+    hjson *json = jsonParse(TEST_JSON, strlen(TEST_JSON));
     print(json, 0);
-    if(jsonWrite("out.json", json) != 0)
-        printf("save failed\n");
+    /*if(jsonWrite("out.json", json) != 0)
+        printf("save failed\n");*/
     jsonFree(json);
     return EXIT_SUCCESS;
 }
