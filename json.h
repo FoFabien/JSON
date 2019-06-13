@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include <math.h>
 
 // types definitions
 typedef enum
@@ -43,7 +44,7 @@ typedef struct
 #define HASHSIZE 100 // size of the hash table. bigger = less risk of collision but higher memory usage
 
 // functions declarations
-static char* _parse_value(const char *js, const size_t len, size_t *i, int *dot);
+static double _parse_value(const char *js, const size_t len, size_t *i, char* err);
 static int _parse_hexa(const char *js, size_t *i, char** it);
 static char* _parse_string(const char *js, const size_t len, size_t *i);
 static cjson* jsonparse_primitive(const char *js, const size_t len, cjson* json, size_t *i);
@@ -194,28 +195,29 @@ static void jsonFree(cjson* json)
 }
 
 // read a numerical value and convert it into an usable string
-// (TODO: exponant support)
-static char* _parse_value(const char *js, const size_t len, size_t *i, int *dot)
+static double _parse_value(const char *js, const size_t len, size_t *i, char* err)
 {
+    double d = 0.f;
+    double e = 0.f;
+    int dot = 0;
+    int state = 0;
     int sign = 0;
     int num = 0;
     size_t beg = *i;
-    int stop = 0;
-    char* str = NULL;
-    for(; *i < len && js[*i] != '\0' && stop == 0; ++(*i))
+    for(; *i < len && js[*i] != '\0' && state == 0; ++(*i))
     {
         char c = js[*i];
         switch(c)
         {
             case '-':
                 if(*i != beg || sign == 1)
-                    return NULL;
+                    goto parse_value_err;
                 sign = 1;
                 break;
             case '.':
-                if(*i == beg || *dot == 1 || num == 0)
-                    return NULL;
-                *dot = 1;
+                if(*i == beg || dot >= 1 || num == 0)
+                    goto parse_value_err;
+                dot = 1;
                 break;
             case '0':
             case '1':
@@ -228,24 +230,84 @@ static char* _parse_value(const char *js, const size_t len, size_t *i, int *dot)
             case '8':
             case '9':
                 num = 1;
+                if(dot == 0) d = d * 10 + (c - '0');
+                else
+                {
+                    d = d + (c - '0') * pow(0.1, dot);
+                    dot++;
+                }
+                break;
+            case 'e':
+            case 'E':
+                if(*i == beg || num == 0)
+                    goto parse_value_err;
+                state = 2;
+                break;
+            case '\t':
+            case '\r':
+            case '\n':
+            case ' ':
+            case ',':
+                state = 1;
                 break;
             default:
-                if(num == 0)
-                    return NULL;
-                stop = 1;
-                break;
+                goto parse_value_err;
         }
     }
-    --(*i);
-    if(*i != beg)
+    if(sign) d = -d;
+    if(state == 2)
     {
-        str = malloc(sizeof(char)*(*i-beg+1));
-        str[*i-beg] = '\0';
-        memcpy(str, js+(beg*sizeof(char)), *i-beg);
-        return str;
+        sign = 0;
+        num = 0;
+        beg = *i;
+        for(; *i < len && js[*i] != '\0' && state == 2; ++(*i))
+        {
+            char c = js[*i];
+            switch(c)
+            {
+                case '+':
+                    if(*i != beg || sign != 0)
+                        goto parse_value_err;
+                    sign = 2;
+                    break;
+                case '-':
+                    if(*i != beg || sign != 0)
+                        goto parse_value_err;
+                    sign = 1;
+                    break;
+                case '0':
+                case '1':
+                case '2':
+                case '3':
+                case '4':
+                case '5':
+                case '6':
+                case '7':
+                case '8':
+                case '9':
+                    num = 1;
+                    e = e * 10 + (c - '0');
+                    break;
+                case '\t':
+                case '\r':
+                case '\n':
+                case ' ':
+                case ',':
+                    state = 1;
+                    break;
+                default:
+                    goto parse_value_err;
+            }
+        }
+        if(sign == 1) e = - e;
+        d = pow(d, e);
     }
-    else
-        return NULL;
+    --(*i);
+    if(state == 0) goto parse_value_err;
+    return d;
+parse_value_err:
+    *err = -1;
+    return 0;
 }
 
 // read hexadecimal characters (used by \u)
@@ -655,25 +717,23 @@ list_err:
 // call _parse_value and create either an integer or float json object
 static cjson* jsonparse_value(const char *js, const size_t len, cjson* json, size_t *i)
 {
-    int dot = 0;
-    char* str = _parse_value(js, len, i, &dot);
-    if(str == NULL)
+    char err = 0;
+    double d = _parse_value(js, len, i, &err);
+    if(err != 0)
         return NULL;
     else
     {
-        if(dot)
+        if(ceil(d) != d)
         {
-            float *f = malloc(sizeof(float));
-            *f = strtof(str, NULL);
-            free(str);
-            return jsonalloc(JSONFLOAT, f);
+            double *dm = malloc(sizeof(double));
+            *dm = d;
+            return jsonalloc(JSONFLOAT, dm);
         }
         else
         {
-            int64_t *d = malloc(sizeof(int64_t));
-            *d = strtoull(str, NULL, 10);
-            free(str);
-            return jsonalloc(JSONINT, d);
+            int64_t *llu = malloc(sizeof(int64_t));
+            *llu = d;
+            return jsonalloc(JSONINT, llu);
         }
     }
 }
@@ -781,8 +841,8 @@ static char* jsonGetBool(cjson* json)
     return json->ptr;
 }
 
-// get a pointer to the float (for float json objects)
-static float* jsonGetFloat(cjson* json)
+// get a pointer to the double (for floating json objects)
+static double* jsonGetFloat(cjson* json)
 {
     if(json == NULL || json->type != JSONFLOAT)
         return NULL;
@@ -1018,8 +1078,8 @@ static int _write_value(FILE* f, cjson* json)
     {
         case JSONFLOAT:
             {
-                float *f = json->ptr;
-                sprintf(buf, "%f", *f);
+                double *d = json->ptr;
+                sprintf(buf, "%f", *d);
                 break;
             }
         case JSONINT:

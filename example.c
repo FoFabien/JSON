@@ -5,6 +5,7 @@
 static const char *TEST_JSON =
     "{"
     "\"string\" : \"hello world!\","
+    "\"exp\" : 0.13674E+3,"
     "\"pi\" : 3.14159265359,"
     "\"number\" : -56340,"
     "\"array\" : ["
@@ -64,8 +65,8 @@ void print(cjson* json, int indent)
                 break;
             case JSONFLOAT:
                 {
-                    float *f = jsonGetFloat(json);
-                    printf("%f\n", *f);
+                    double *d = jsonGetFloat(json);
+                    printf("%f\n", *d);
                     break;
                 }
             case JSONINT:
