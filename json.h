@@ -119,15 +119,15 @@ static void dictfree(dict* d)
 {
 	int i;
 	for(i = 0; i < HASHSIZE && d->size; ++i)
-    {
-        dict_entry* entry = NULL;
-        for(entry = d->hashtab[i]; entry != NULL; entry = entry->next)
-        {
-            jsonFree(entry->item);
-            free(entry->key);
-            free(entry);
-        }
-    }
+	{
+		dict_entry* entry = NULL;
+		for(entry = d->hashtab[i]; entry != NULL; entry = entry->next)
+		{
+			jsonFree(entry->item);
+			free(entry->key);
+			free(entry);
+		}
+	}
 	free(d->hashtab);
 	free(d);
 }
@@ -459,39 +459,39 @@ static cjson* jsonparse_obj(const char *js, const size_t len, cjson* json, size_
 				break;
 			case '}':
 				if(d->size > 0 && state != 3)
-                    goto obj_err;
+					goto obj_err;
 				return obj;
 				break;
 			case ',':
 				if(state != 3)
-                    goto obj_err;
+					goto obj_err;
 				state = 0;
 				break;
 			case ':':
 				if(state != 1)
-                    goto obj_err;
+					goto obj_err;
 				state = 2;
 				break;
 			case '{':
 				if(state != 2)
-                    goto obj_err;
+					goto obj_err;
 				++(*i);
 				item = jsonparse_obj(js, len, obj, i);
 				if(item == NULL || dictinstall(d->hashtab, key, item) == NULL)
-                    goto obj_err;
-                free(key);
+					goto obj_err;
+				free(key);
 				key = NULL;
 				item = NULL;
 				state = 3;
 				break;
 			case '[':
 				if(state != 2)
-                    goto obj_err;
+					goto obj_err;
 				++(*i);
 				item = jsonparse_array(js, len, obj, i);
 				if(item == NULL || dictinstall(d->hashtab, key, item) == NULL)
-                    goto obj_err;
-                free(key);
+					goto obj_err;
+				free(key);
 				key = NULL;
 				item = NULL;
 				state = 3;
@@ -508,12 +508,12 @@ static cjson* jsonparse_obj(const char *js, const size_t len, cjson* json, size_
 			case '8':
 			case '9':
 				if(state != 2)
-                    goto obj_err;
+					goto obj_err;
 				item = jsonparse_value(js, len, obj, i);
 				if(item == NULL || dictinstall(d->hashtab, key, item) == NULL)
-                    goto obj_err;
+					goto obj_err;
 				--(*i);
-                free(key);
+				free(key);
 				key = NULL;
 				item = NULL;
 				state = 3;
@@ -522,11 +522,11 @@ static cjson* jsonparse_obj(const char *js, const size_t len, cjson* json, size_
 			case 'f':
 			case 'n':
 				if(state != 2)
-                    goto obj_err;
+					goto obj_err;
 				item = jsonparse_primitive(js, len, obj, i);
 				if(item == NULL || dictinstall(d->hashtab, key, item) == NULL)
-                    goto obj_err;
-                free(key);
+					goto obj_err;
+				free(key);
 				key = NULL;
 				item = NULL;
 				state = 3;
@@ -534,11 +534,11 @@ static cjson* jsonparse_obj(const char *js, const size_t len, cjson* json, size_
 			case '\"':
 				{
 					if(state % 2 == 1)
-                        goto obj_err;
+						goto obj_err;
 					++(*i);
 					char* tmp = _parse_string(js, len, i);
 					if(tmp == NULL)
-                        goto obj_err;
+						goto obj_err;
 					if(state == 0)
 					{
 						key = tmp;
@@ -548,8 +548,8 @@ static cjson* jsonparse_obj(const char *js, const size_t len, cjson* json, size_
 					{
 						item = jsonalloc(JSONSTR, tmp);
 						if(item == NULL || dictinstall(d->hashtab, key, item) == NULL)
-                            goto obj_err;
-                        free(key);
+							goto obj_err;
+						free(key);
 						key = NULL;
 						item = NULL;
 						state = 3;
@@ -561,8 +561,8 @@ static cjson* jsonparse_obj(const char *js, const size_t len, cjson* json, size_
 		}
 	}
 obj_err:
-    free(key);
-    jsonFree(item);
+	free(key);
+	jsonFree(item);
 	jsonFree(obj);
 	return NULL;
 }
@@ -584,19 +584,19 @@ static cjson* jsonparse_array(const char *js, const size_t len, cjson* json, siz
 				break;
 			case ']':
 				if(list->size > 0 && comma == 0)
-				    goto list_err;
+					goto list_err;
 				return list;
 				break;
 			case ',':
 				if(comma != 1)
-				    goto list_err;
+					goto list_err;
 				comma = 0;
 				break;
 			case '{':
 				++(*i);
 				((cjson**)(list->ptr))[list->size] = jsonparse_obj(js, len, list, i);
 				if(((cjson**)(list->ptr))[list->size] == NULL)
-                    goto list_err;
+					goto list_err;
 				++list->size;
 				comma = 1;
 				break;
@@ -604,7 +604,7 @@ static cjson* jsonparse_array(const char *js, const size_t len, cjson* json, siz
 				++(*i);
 				((cjson**)(list->ptr))[list->size] = jsonparse_array(js, len, list, i);
 				if(((cjson**)(list->ptr))[list->size] == NULL)
-                    goto list_err;
+					goto list_err;
 				++list->size;
 				comma = 1;
 				break;
@@ -621,7 +621,7 @@ static cjson* jsonparse_array(const char *js, const size_t len, cjson* json, siz
 			case '9':
 				((cjson**)(list->ptr))[list->size] = jsonparse_value(js, len, list, i);
 				if(((cjson**)(list->ptr))[list->size] == NULL)
-                    goto list_err;
+					goto list_err;
 				++list->size;
 				comma = 1;
 				--(*i);
@@ -631,7 +631,7 @@ static cjson* jsonparse_array(const char *js, const size_t len, cjson* json, siz
 			case 'n':
 				((cjson**)(list->ptr))[list->size] = jsonparse_primitive(js, len, list, i);
 				if(((cjson**)(list->ptr))[list->size] == NULL)
-                    goto list_err;
+					goto list_err;
 				++list->size;
 				comma = 1;
 				break;
@@ -639,7 +639,7 @@ static cjson* jsonparse_array(const char *js, const size_t len, cjson* json, siz
 				++(*i);
 				((cjson**)(list->ptr))[list->size] = jsonparse_string(js, len, list, i);
 				if(((cjson**)(list->ptr))[list->size] == NULL)
-                    goto list_err;
+					goto list_err;
 				++list->size;
 				comma = 1;
 				break;
@@ -761,8 +761,8 @@ static cjson* jsonParse(const char *js, const size_t len)
 	}
 	return root;
 parse_err:
-    jsonFree(root);
-    return NULL;
+	jsonFree(root);
+	return NULL;
 }
 
 // get a pointer to the integer (for integer json objects)
