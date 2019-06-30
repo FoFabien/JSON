@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+// test json
 static const char *TEST_JSON =
     "{"
     "\"string\" : \"hello world!\","
@@ -15,6 +16,7 @@ static const char *TEST_JSON =
     "\"boolean\" : true"
     "}";
 
+// print the content of the json object, recursively
 void print(hjson* json, int indent)
 {
     int i;
@@ -96,10 +98,21 @@ void print(hjson* json, int indent)
 
 int main()
 {
+    // create the json object from the string above
     hjson *json = jsonParse(TEST_JSON, strlen(TEST_JSON));
+    // add a string value to our object
+    hjson *tmp;
+    if(jsonObjSet(json, "example", tmp = jsonAlloc(JSONSTR, "this is an example\nhello world!!")) != 0) // !! the example string should be a separate pointer, as jsonFree will free it
+    {
+        printf("failed to modify\n");
+        jsonFree(tmp);
+    }
+    // print the content
     print(json, 0);
-    /*if(jsonWrite("out.json", json) != 0)
-        printf("save failed\n");*/
+    // write to file
+    if(jsonWrite("out.json", json) != 0)
+        printf("save failed\n");
+    // free the memory
     jsonFree(json);
     return EXIT_SUCCESS;
 }

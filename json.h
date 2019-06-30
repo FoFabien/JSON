@@ -188,7 +188,7 @@ static void jlistfree(jlist* l)
 }
 
 // create a json object of the specified type
-static hjson* jsonalloc(jsontype type, void* init_value)
+static hjson* jsonAlloc(jsontype type, void* init_value)
 {
     hjson* json = malloc(sizeof(hjson));
     json->type = type;
@@ -519,7 +519,7 @@ static hjson* jsonparse_primitive(const char *js, const size_t len, size_t *i)
                 char* b = malloc(sizeof(char));
                 *b = 1;
                 *i+=3;
-                return jsonalloc(JSONBOOL, b);
+                return jsonAlloc(JSONBOOL, b);
             }
             else
                 return NULL;
@@ -530,7 +530,7 @@ static hjson* jsonparse_primitive(const char *js, const size_t len, size_t *i)
                 char* b = malloc(sizeof(char));
                 *b = 0;
                 *i+=4;
-                return jsonalloc(JSONBOOL, b);
+                return jsonAlloc(JSONBOOL, b);
             }
             else
                 return NULL;
@@ -541,7 +541,7 @@ static hjson* jsonparse_primitive(const char *js, const size_t len, size_t *i)
                 char* b = malloc(sizeof(char));
                 *b = 0;
                 *i+=3;
-                return jsonalloc(JSONPRIM, b);
+                return jsonAlloc(JSONPRIM, b);
             }
             else
                 return NULL;
@@ -555,7 +555,7 @@ static hjson* jsonparse_primitive(const char *js, const size_t len, size_t *i)
 // read a json object
 static hjson* jsonparse_obj(const char *js, const size_t len, size_t *i)
 {
-    hjson* obj = jsonalloc(JSONOBJ, NULL);
+    hjson* obj = jsonAlloc(JSONOBJ, NULL);
     jdict* d = obj->ptr;
     char* key = NULL;
     hjson* item = NULL;
@@ -659,7 +659,7 @@ static hjson* jsonparse_obj(const char *js, const size_t len, size_t *i)
                     }
                     else if(state == 2)
                     {
-                        item = jsonalloc(JSONSTR, tmp);
+                        item = jsonAlloc(JSONSTR, tmp);
                         if(item == NULL || jdictinstall(d->hashtab, key, item) == NULL)
                             goto obj_err;
                         free(key);
@@ -683,7 +683,7 @@ obj_err:
 // read a json list
 static hjson* jsonparse_array(const char *js, const size_t len, size_t *i)
 {
-    hjson* list = jsonalloc(JSONLIST, NULL);
+    hjson* list = jsonAlloc(JSONLIST, NULL);
     jlist* l = list->ptr;
     int comma = 0;
     for(; *i < len && js[*i] != '\0'; ++(*i))
@@ -774,13 +774,13 @@ static hjson* jsonparse_value(const char *js, const size_t len, size_t *i)
         {
             double *dm = malloc(sizeof(double));
             *dm = d;
-            return jsonalloc(JSONFLOAT, dm);
+            return jsonAlloc(JSONFLOAT, dm);
         }
         else
         {
             int64_t *llu = malloc(sizeof(int64_t));
             *llu = d;
-            return jsonalloc(JSONINT, llu);
+            return jsonAlloc(JSONINT, llu);
         }
     }
 }
@@ -791,7 +791,7 @@ static hjson* jsonparse_string(const char *js, const size_t len, size_t *i)
     char *str = _parse_string(js, len, i);
     if(str == NULL)
         return NULL;
-    return jsonalloc(JSONSTR, str);
+    return jsonAlloc(JSONSTR, str);
 }
 
 
@@ -938,12 +938,13 @@ static size_t jsonListSize(hjson* json)
 }
 
 // append a json object to a json list (in the limit defined by JSON_MAX)
-static void jsonListAppend(hjson* json, hjson* app)
+static int jsonListAppend(hjson* json, hjson* app)
 {
     if(json == NULL || json->type != JSONLIST)
-        return;
+        return -1;
     jlist* l = json->ptr;
     jlist_append(l, app);
+    return 0;
 }
 
 // set an element in a json list (previous one will be free)
@@ -982,12 +983,13 @@ static int jsonObjSet(hjson* json, char* key, hjson* set)
 }
 
 // delete an item in a json object
-static void jsonObjDel(hjson* json, char* key)
+static int jsonObjDel(hjson* json, char* key)
 {
     if(json == NULL || json->type != JSONOBJ)
-        return;
+        return -1;
     jdict *d = json->ptr;
     jdictuninstall(d->hashtab, key);
+    return 0;
 }
 
 // read a file on disk and create a json object
