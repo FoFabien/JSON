@@ -31,7 +31,6 @@ if(jsonWrite(your_file_path, json) != 0) printf("failed to save\n");
 * Editing:  
 A few functions are available to access the pointers or to manipulate the json list or objects in a simple way.  
 Keep in mind the `hjson` structure represents a json value. For example, a `hjson` variable with the type `JSONLIST` will refers to a `jlist` structure which is pretty much an array of `hjson` pointers (in short: everything are `hjson`, the values contained in your list and the list itself).  
-  
 Here's a quick rundown:  
 `jsonAlloc` - create a json object from a type and a pointer to the corresponding value.  
 `jsonFree` - destroy the json object and free the memory from all values.  
